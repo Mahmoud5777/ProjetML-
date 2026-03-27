@@ -4,4 +4,3 @@ data/raw/
 data/processed/
 data/train_test/
 *.joblib
-*.pkl

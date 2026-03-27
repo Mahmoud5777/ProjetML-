@@ -1,82 +1,55 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-import joblib
 
-# ===============================
-# 1. Charger données
-# ===============================
-df = pd.read_csv("data/raw/retail_customers_COMPLETE_CATEGORICAL.csv")
+def clean_and_preprocess(df):
+    """
+    Fonction principale pour nettoyer et préparer les données brutes.
+    Utilisée à la fois pour l'entraînement et pour les nouvelles prédictions.
+    """
+    # Travailler sur une copie pour ne pas modifier l'original
+    df_clean = df.copy()
 
-print("Colonnes détectées :")
-print(df.columns)
+    # 1. Parsing des dates
+    if 'RegistrationDate' in df_clean.columns:
+        # CORRECTION : Ajout de format='mixed' pour gérer les différents formats sans avertissement
+        df_clean['RegistrationDate'] = pd.to_datetime(df_clean['RegistrationDate'], format='mixed', errors='coerce')
+        df_clean['RegYear'] = df_clean['RegistrationDate'].dt.year
+        df_clean['RegMonth'] = df_clean['RegistrationDate'].dt.month
+        df_clean.drop('RegistrationDate', axis=1, inplace=True)
 
-# ===============================
-# 2. Supprimer colonnes inutiles
-# ===============================
-df.drop(columns=["NewsletterSubscribed", "LastLoginIP"],
-        errors="ignore", inplace=True)
+    # 2. Suppression des colonnes inutiles ou constantes
+    cols_to_drop = ['NewsletterSubscribed', 'LastLoginIP', 'CustomerID']
+    existing_cols_to_drop = [col for col in cols_to_drop if col in df_clean.columns]
+    if existing_cols_to_drop:
+        df_clean.drop(columns=existing_cols_to_drop, inplace=True)
 
-# ===============================
-# 3. Séparer target
-# ===============================
-y = df["Churn"]
-X = df.drop("Churn", axis=1)
+    # 3. Traitement des valeurs aberrantes et manquantes de base
+    if 'Age' in df_clean.columns:
+        # CORRECTION : Remplacement direct sans utiliser inplace=True
+        df_clean['Age'] = df_clean['Age'].fillna(df_clean['Age'].median())
+        
+    if 'SupportTickets' in df_clean.columns:
+        df_clean['SupportTickets'] = df_clean['SupportTickets'].replace([-1, 999], 0)
+        # CORRECTION : Remplacement direct sans utiliser inplace=True
+        df_clean['SupportTickets'] = df_clean['SupportTickets'].fillna(0)
 
-# ===============================
-# 4. Identifier colonnes
-# ===============================
-numeric_features = X.select_dtypes(include=["int64", "float64"]).columns
-categorical_features = X.select_dtypes(include=["object"]).columns
+    # 4. Feature Engineering
+    if 'MonetaryTotal' in df_clean.columns and 'Frequency' in df_clean.columns:
+        df_clean['AvgBasketValue'] = df_clean['MonetaryTotal'] / df_clean['Frequency'].replace(0, 1)
 
-print("Colonnes numériques :", numeric_features)
-print("Colonnes catégorielles :", categorical_features)
+    # 5. Encodage One-Hot des variables catégorielles (Texte -> Nombres)
+    if 'Churn' in df_clean.columns:
+        y = df_clean['Churn']
+        X = df_clean.drop('Churn', axis=1)
+        X = pd.get_dummies(X, drop_first=True)
+        X = X.astype(float) # S'assurer que tout est numérique
+        X['Churn'] = y
+        df_clean = X
+    else:
+        # Cas d'une prédiction sur un nouveau client
+        df_clean = pd.get_dummies(df_clean, drop_first=True)
+        df_clean = df_clean.astype(float)
 
-# ===============================
-# 5. Pipelines
-# ===============================
-numeric_pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler())
-])
+    return df_clean
 
-categorical_pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="most_frequent")),
-    ("onehot", OneHotEncoder(handle_unknown="ignore"))
-])
-
-preprocessor = ColumnTransformer([
-    ("num", numeric_pipeline, numeric_features),
-    ("cat", categorical_pipeline, categorical_features)
-])
-
-# ===============================
-# 6. Split
-# ===============================
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y,
-    test_size=0.2,
-    random_state=42,
-    stratify=y
-)
-
-# ===============================
-# 7. Appliquer preprocessing
-# ===============================
-X_train = preprocessor.fit_transform(X_train)
-X_test = preprocessor.transform(X_test)
-
-# ===============================
-# 8. Sauvegarde
-# ===============================
-joblib.dump(preprocessor, "models/preprocessor.pkl")
-
-pd.DataFrame(X_train).to_csv("data/train_test/X_train.csv", index=False)
-pd.DataFrame(X_test).to_csv("data/train_test/X_test.csv", index=False)
-y_train.to_csv("data/train_test/y_train.csv", index=False)
-y_test.to_csv("data/train_test/y_test.csv", index=False)
-
-print("✅ Preprocessing terminé avec succès !")
+if __name__ == "__main__":
+    print("Le module preprocessing est prêt à être importé !")
